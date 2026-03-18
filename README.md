@@ -1,6 +1,6 @@
 # no-use-effect
 
-A [Claude Code skill](https://skills.sh) that enforces a strict no-direct-`useEffect` rule in React and React Native codebases.
+A Skill that enforces a strict no-direct-`useEffect` rule in React and React Native codebases.
 
 Based on [Factory's approach](https://x.com/alvinsng/status/1900587498498195) and React's official [You Might Not Need an Effect](https://react.dev/learn/you-might-not-need-an-effect) guide.
 
