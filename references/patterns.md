@@ -15,6 +15,9 @@ Extended examples for each rule when the SKILL.md summary isn't enough.
 - [Parent Notification](#parent-notification)
 - [External Store Subscription](#external-store-subscription)
 - [App Initialization](#app-initialization)
+- [Effect-Ref Debt Spiral](#effect-ref-debt-spiral)
+- [useEffectEvent](#useeffectevent)
+- [Callback Refs](#callback-refs)
 
 ---
 
@@ -398,3 +401,219 @@ function App() {
   });
 }
 ```
+
+---
+
+## Effect-Ref Debt Spiral
+
+When a `useEffect` causes problems (double-firing, stale closures, loops), developers often "patch" it with a `useRef` instead of fixing the root cause. This creates a brittle hybrid where two state systems compete: one React tracks (useState) and one it doesn't (useRef). The fix is always to eliminate the effect, not to bandage it.
+
+### `hasRun` guard to prevent double-fire
+
+```tsx
+// BAD: ref guard hides the real problem — Strict Mode double-fire exists
+// to surface missing cleanup, not to be silenced
+function UserGreeting({ userId }) {
+  const hasRun = useRef(false);
+  useEffect(() => {
+    if (hasRun.current) return;
+    hasRun.current = true;
+    showWelcomeToast(userId);
+  }, [userId]);
+}
+
+// GOOD: if it's truly one-time mount setup
+function UserGreeting({ userId }) {
+  useMountEffect(() => {
+    showWelcomeToast(userId);
+  });
+}
+
+// BETTER: if the toast is a response to navigation, it belongs in the
+// navigation handler, not in the component lifecycle at all
+```
+
+### `isMounted` ref to avoid set-state-after-unmount
+
+```tsx
+// BAD: isMounted ref masks a missing cancellation
+function Profile({ userId }) {
+  const [user, setUser] = useState(null);
+  const isMounted = useRef(true);
+  useEffect(() => {
+    fetchUser(userId).then(data => {
+      if (isMounted.current) setUser(data);
+    });
+    return () => { isMounted.current = false; };
+  }, [userId]);
+}
+
+// GOOD: data-fetching library handles cancellation
+function Profile({ userId }) {
+  const { data: user } = useQuery(['user', userId], () => fetchUser(userId));
+}
+
+// GOOD: if no library, use a cleanup boolean in a custom hook (not a ref)
+function useData(url) {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    let ignore = false;
+    fetch(url)
+      .then(r => r.json())
+      .then(json => { if (!ignore) setData(json); });
+    return () => { ignore = true; };
+  }, [url]);
+  return data;
+}
+```
+
+**Why `ignore` is not the same as `isMounted.current`:** The `ignore` boolean is scoped to a single effect execution and cleaned up by that same execution's cleanup function. It doesn't persist across renders or leak into other parts of the component. A `useRef` persists across the entire component lifetime and creates a second, invisible state channel.
+
+### Ref to capture latest callback (dodging the dependency array)
+
+```tsx
+// BAD: ref stores latest callback to avoid listing it as a dependency
+function ChatRoom({ roomId, onMessage }) {
+  const onMessageRef = useRef(onMessage);
+  onMessageRef.current = onMessage;
+
+  useEffect(() => {
+    const conn = createConnection(roomId);
+    conn.on('message', (msg) => onMessageRef.current(msg));
+    return () => conn.disconnect();
+  }, [roomId]); // onMessage is missing — linter would complain without the ref trick
+}
+
+// GOOD: useEffectEvent (see section below)
+// GOOD: if no useEffectEvent, isolate in a custom hook — never in a component
+```
+
+---
+
+## useEffectEvent
+
+`useEffectEvent` is an experimental React API that solves the "latest value in an effect" problem. It wraps non-reactive logic so that it always reads the latest values without being a dependency of the effect.
+
+### Reading latest callback without refs
+
+```tsx
+// BAD: ref workaround for latest callback
+function ChatRoom({ roomId, onMessage }) {
+  const onMessageRef = useRef(onMessage);
+  onMessageRef.current = onMessage;
+  useEffect(() => {
+    const conn = createConnection(roomId);
+    conn.on('message', (msg) => onMessageRef.current(msg));
+    return () => conn.disconnect();
+  }, [roomId]);
+}
+
+// GOOD: useEffectEvent captures latest values automatically
+function ChatRoom({ roomId, onMessage }) {
+  const onMsg = useEffectEvent((msg) => {
+    onMessage(msg);
+  });
+
+  useEffect(() => {
+    const conn = createConnection(roomId);
+    conn.on('message', onMsg);
+    return () => conn.disconnect();
+  }, [roomId]); // onMsg is stable, no need to list it
+}
+```
+
+### Logging with latest state
+
+```tsx
+// BAD: ref to read latest theme in effect
+function Page({ url }) {
+  const [theme, setTheme] = useState('light');
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
+  useEffect(() => {
+    logVisit(url, themeRef.current);
+  }, [url]); // eslint-disable-next-line — lying to the linter
+
+  // ...
+}
+
+// GOOD: useEffectEvent
+function Page({ url }) {
+  const [theme, setTheme] = useState('light');
+  const onVisit = useEffectEvent(() => {
+    logVisit(url, theme); // always reads latest theme
+  });
+  useEffect(() => {
+    onVisit();
+  }, [url]);
+
+  // ...
+}
+```
+
+**Until `useEffectEvent` is stable:** prefer moving logic to event handlers or `useMountEffect`. If neither fits, isolate the ref workaround in a custom hook — never directly in a component.
+
+---
+
+## Callback Refs
+
+When you need a side effect tied to a DOM node's presence, a callback ref is more reliable than `useRef` + `useMountEffect`. It fires exactly when the node attaches or detaches, with no timing issues.
+
+### Measuring a DOM node
+
+```tsx
+// BAD: ref.current may be null on first render if the node is conditionally rendered
+function MeasuredBox() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState(0);
+  useMountEffect(() => {
+    setHeight(ref.current!.getBoundingClientRect().height);
+  });
+  return <div ref={ref}>Content</div>;
+}
+
+// GOOD: callback ref fires when node is attached
+function MeasuredBox() {
+  const [height, setHeight] = useState(0);
+  const measuredRef = useCallback((node: HTMLDivElement | null) => {
+    if (node !== null) {
+      setHeight(node.getBoundingClientRect().height);
+    }
+  }, []);
+  return <div ref={measuredRef}>Content</div>;
+}
+```
+
+### Focus on mount
+
+```tsx
+// BAD
+const inputRef = useRef<HTMLInputElement>(null);
+useMountEffect(() => { inputRef.current?.focus(); });
+return <input ref={inputRef} />;
+
+// GOOD: callback ref
+<input ref={(node) => node?.focus()} />
+```
+
+### Third-party library initialization (React 19+)
+
+```tsx
+// BAD: ref + useMountEffect
+const containerRef = useRef<HTMLDivElement>(null);
+useMountEffect(() => {
+  const chart = new Chart(containerRef.current!, config);
+  return () => chart.destroy();
+});
+return <div ref={containerRef} />;
+
+// GOOD: callback ref with cleanup (React 19+ supports return values)
+const chartRef = useCallback((node: HTMLDivElement | null) => {
+  if (node === null) return;
+  const chart = new Chart(node, config);
+  return () => chart.destroy(); // cleanup when node detaches
+}, [config]);
+return <div ref={chartRef} />;
+```
+
+**Note:** React 19 supports cleanup return values from callback refs. For earlier versions, store the cleanup in a ref inside a custom hook.

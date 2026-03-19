@@ -16,7 +16,7 @@ export function useMountEffect(effect: () => void | (() => void)) {
 
 The only place `useEffect` may appear directly is inside reusable custom hooks (like `useMountEffect` itself, or a `useData` hook when no fetching library is available). Components must never import or call `useEffect`.
 
-## The 5 Rules
+## The 6 Rules
 
 ### Rule 1: Derive state, do not sync it
 
@@ -65,7 +65,7 @@ const { data: product } = useQuery(
 
 ### Rule 3: Event handlers, not effects
 
-If a user action triggers it, do the work in the handler.
+If a user action triggers it, do the work in the handler. Procedural logic (validate → transform → submit) belongs in handlers. Reconstructing procedural flow through ref+effect chains is a sign the logic was event-driven from the start.
 
 ```tsx
 // BAD: flag-relay through effect
@@ -131,6 +131,50 @@ This also applies to resetting form state, clearing selections, etc. Use `key` o
 
 **Smell test:** Effect's only job is to reset local state when an ID/prop changes.
 
+### Rule 6: Never patch a broken effect with a ref
+
+If you need a `useRef` to stop an effect from double-firing, looping, or accessing stale state, the effect itself is the problem. Eliminate the root effect — don't bandage it with a ref.
+
+```tsx
+// BAD: ref guard hides the real problem
+const hasRun = useRef(false);
+useEffect(() => {
+  if (hasRun.current) return;
+  hasRun.current = true;
+  showWelcomeToast(userId);
+}, [userId]);
+
+// GOOD: useMountEffect for true one-time setup
+useMountEffect(() => {
+  showWelcomeToast(userId);
+});
+```
+
+```tsx
+// BAD: ref to capture latest callback, dodging the dependency array
+const onMessageRef = useRef(onMessage);
+onMessageRef.current = onMessage;
+useEffect(() => {
+  const conn = createConnection(roomId);
+  conn.on('message', (msg) => onMessageRef.current(msg));
+  return () => conn.disconnect();
+}, [roomId]);
+
+// GOOD: useEffectEvent (experimental) captures latest values automatically
+const onMsg = useEffectEvent((msg) => {
+  onMessage(msg);
+});
+useEffect(() => {
+  const conn = createConnection(roomId);
+  conn.on('message', onMsg);
+  return () => conn.disconnect();
+}, [roomId]);
+```
+
+The React docs explicitly warn: *"The right question isn't 'how to run an Effect once', but 'how to fix my Effect so that it works after remounting'."*
+
+**Smell test:** You're adding `hasRun.current`, `isMounted.current`, or a ref whose sole purpose is controlling when/if an effect runs. Or you're storing a callback in a ref to avoid listing it as a dependency.
+
 ## Additional Patterns
 
 ### Notifying parents about state changes
@@ -147,6 +191,52 @@ function updateToggle(nextIsOn) {
   onChange(nextIsOn);
 }
 ```
+
+### useEffectEvent for latest values (experimental)
+
+When an effect needs to read the latest value of a prop/state without re-running when it changes, use `useEffectEvent` instead of a ref workaround:
+
+```tsx
+// BAD: ref to read latest theme without adding it as dependency
+const themeRef = useRef(theme);
+themeRef.current = theme;
+useEffect(() => {
+  logVisit(url, themeRef.current);
+}, [url]);
+
+// GOOD: useEffectEvent reads latest values automatically
+const onVisit = useEffectEvent(() => {
+  logVisit(url, theme);
+});
+useEffect(() => {
+  onVisit();
+}, [url]);
+```
+
+Until `useEffectEvent` is stable, prefer moving logic to event handlers or `useMountEffect`. If neither fits, isolate the ref workaround in a custom hook — never in a component.
+
+### Callback refs for DOM side effects
+
+For DOM measurement or setup, a callback ref is more reliable than `useRef` + `useMountEffect` — it fires exactly when the node attaches or detaches:
+
+```tsx
+// BAD: ref.current may be null on first render
+const ref = useRef(null);
+useMountEffect(() => {
+  setHeight(ref.current.getBoundingClientRect().height);
+});
+return <div ref={ref}>Content</div>;
+
+// GOOD: callback ref fires when node is attached
+const measuredRef = useCallback((node: HTMLDivElement | null) => {
+  if (node !== null) {
+    setHeight(node.getBoundingClientRect().height);
+  }
+}, []);
+return <div ref={measuredRef}>Content</div>;
+```
+
+In React 19+, callback refs support cleanup return values. For earlier versions, store cleanup logic in a ref inside a custom hook.
 
 ### Subscribing to external stores
 
@@ -203,6 +293,8 @@ Before writing any effect, answer these questions:
 4. **Am I subscribing to an external store?** -> `useSyncExternalStore`
 5. **Do I need to reset state when a prop changes?** -> `key` prop
 6. **Is it true mount-time external system sync?** -> `useMountEffect`
+7. **Am I using refs to control when/if an effect runs?** -> Remove the refs; move logic to an event handler, derive it, or use `useEffectEvent`
+8. **Do I need a DOM side effect when a node mounts?** -> Callback ref
 
 If none of the above apply and you still think you need `useEffect`, see [references/patterns.md](references/patterns.md) for detailed examples.
 
