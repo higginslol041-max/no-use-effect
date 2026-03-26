@@ -61,6 +61,16 @@ const { data: product } = useQuery(
 );
 ```
 
+In React 19+, use the `use()` hook with `<Suspense>` to unwrap promises without `useEffect` or `useState`:
+
+```tsx
+// GOOD: use() + Suspense (React 19+)
+function UserProfile({ userPromise }: { userPromise: Promise<User> }) {
+  const user = use(userPromise);
+  return <h1>{user.name}</h1>;
+}
+```
+
 **Smell test:** Your effect does `fetch()` then `setState()`, or you're reimplementing caching/retries/cancellation.
 
 ### Rule 3: Event handlers, not effects
@@ -289,7 +299,7 @@ Before writing any effect, answer these questions:
 
 1. **Can I compute it during render?** -> Derive it inline or `useMemo`
 2. **Is it triggered by a user action?** -> Event handler
-3. **Am I fetching data?** -> Data-fetching library (React Query, SWR, etc.)
+3. **Am I fetching data?** -> Data-fetching library (React Query, SWR, etc.) or `use()` + Suspense in React 19+
 4. **Am I subscribing to an external store?** -> `useSyncExternalStore`
 5. **Do I need to reset state when a prop changes?** -> `key` prop
 6. **Is it true mount-time external system sync?** -> `useMountEffect`
